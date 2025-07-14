@@ -1,10 +1,9 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Volume2, MoreHorizontal, Heart, Share, Repeat, Shuffle, RotateCcw } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Volume2, Heart, Share, Repeat, Shuffle, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 /**
@@ -144,6 +143,16 @@ const AUDIO_CONFIG = {
  */
 export default function MusicPlayer() {
   // ============================================================================
+  // HYDRATION SAFETY
+  // ============================================================================
+  
+  /** 
+   * Hydration safety flag to prevent SSR/client mismatch
+   * Ensures component only renders interactive content after hydration
+   */
+  const [isMounted, setIsMounted] = useState<boolean>(false)
+
+  // ============================================================================
   // STATE MANAGEMENT
   // ============================================================================
   
@@ -155,7 +164,6 @@ export default function MusicPlayer() {
   
   /** UI state management */
   const [isLiked, setIsLiked] = useState<boolean>(false)
-  const [showEffects] = useState<boolean>(true) // Reserved for future toggle functionality
   
   /** Audio processing state */
   const [effects, setEffects] = useState<AudioEffects>(DEFAULT_EFFECTS)
@@ -188,6 +196,19 @@ export default function MusicPlayer() {
     reverbDryGain: null,
     reverbWetGain: null
   })
+
+  // ============================================================================
+  // HYDRATION SAFETY EFFECT
+  // ============================================================================
+
+  /**
+   * Hydration safety effect
+   * Sets mounted flag after component hydrates to prevent SSR/client mismatches
+   * This fixes issues with browser extensions (like Grammarly) modifying the DOM
+   */
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   // ============================================================================
   // AUDIO PROCESSING UTILITIES
@@ -298,7 +319,7 @@ export default function MusicPlayer() {
 
       try {
         // Initialize Audio Context with fallback for older browsers
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
         if (!AudioContextClass) {
           throw new Error('Web Audio API not supported in this browser')
         }
@@ -402,16 +423,19 @@ export default function MusicPlayer() {
 
     // Cleanup function to prevent memory leaks
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
+      const currentAnimationFrame = animationRef.current
+      const currentAudioContext = audioNodesRef.current.context
+      
+      if (currentAnimationFrame) {
+        cancelAnimationFrame(currentAnimationFrame)
       }
       
       // Clean up audio context if it exists
-      if (audioNodesRef.current.context?.state === 'running') {
-        audioNodesRef.current.context.close().catch(console.error)
+      if (currentAudioContext?.state === 'running') {
+        currentAudioContext.close().catch(console.error)
       }
     }
-  }, []) // Empty dependency array - run once on mount
+  }, [createDistortionCurve, createReverbImpulse]) // Dependencies for audio system initialization
 
   // ============================================================================
   // WAVEFORM VISUALIZATION SETUP
@@ -615,16 +639,7 @@ export default function MusicPlayer() {
     setCurrentTime(newTime)
   }, [duration, formatTime])
 
-  /**
-   * Handles slider-based seeking
-   * @param value - Array containing the new time value
-   */
-  const handleSliderSeek = useCallback((value: number[]): void => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = value[0]
-      setCurrentTime(value[0])
-    }
-  }, [])
+
 
   // ============================================================================
   // COMPUTED VALUES
@@ -642,6 +657,21 @@ export default function MusicPlayer() {
   // ============================================================================
   // RENDER COMPONENT
   // ============================================================================
+
+  // Prevent hydration mismatches by showing loading state until mounted
+  if (!isMounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <Play className="w-8 h-8 text-white" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Studio Player</h2>
+          <p className="text-gray-600">Initializing audio system...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
